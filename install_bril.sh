@@ -4,7 +4,7 @@ export PATH="~/.deno/bin:$PATH"
 deno --version
 
 #2. install brili
-deno install -g ./brili.ts
+deno install -g bril/brili.ts
 
 #3. install flit
 sudo apt install flit
