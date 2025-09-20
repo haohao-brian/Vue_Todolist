@@ -1,27 +1,20 @@
-#include <fstream>
-#include <iostream>
-#include <string>
-#include <vector>
-#include <queue>
-#include <thread>
-#include <mutex>
-#include <condition_variable>
-#include <atomic>
-#include <unordered_set>
+#include <bits/stdc++.h>
+#include <omp.h>
 using namespace std;
 
+// =================== STATE DEFINITION ===================
 struct State {
     vector<string> board;
-    pair<int,int> pos; 
+    pair<int, int> pos;   // player position (y, x)
+    string path;          // moves leading here
     bool valid;
-    string path;
 
     bool operator==(const State &other) const {
         return pos == other.pos && board == other.board;
     }
 };
 
-// Custom hash for State
+// =================== HASH FUNCTION ===================
 struct StateHash {
     size_t operator()(const State &s) const {
         size_t seed = 0;
@@ -36,15 +29,9 @@ struct StateHash {
     }
 };
 
-// Global
-queue<State> q;
-mutex q_mutex;
-condition_variable cv;
-unordered_set<State, StateHash> visited;
-mutex visited_mutex;
-atomic<bool> solved(false);
-
+// =================== GAME LOGIC ===================
 State try_move(const State &s, int dy, int dx) {
+	//cout << dy << " " << dx << endl;
     State result = s;
     result.valid = true;
 
@@ -96,8 +83,7 @@ State loadstate(const string &filename) {
     int y = 0;
     while (getline(file, line)) {
         for (int x = 0; x < (int)line.size(); x++) {
-            if (line[x] == 'o' || line[x] == 'O' ||
-                line[x] == '!' || line[x] == '@') {
+            if (line[x] == 'o' || line[x] == 'O' || line[x] == '!') {
                 s.pos = {y, x};
             }
         }
@@ -107,68 +93,102 @@ State loadstate(const string &filename) {
     return s;
 }
 
-void worker() {
+// =================== PARALLEL BFS SOLVER ===================
+void solve_parallel(const State &start) {
+    unordered_set<State, StateHash> visited;
+    queue<State> frontier;
+
+    visited.insert(start);
+    frontier.push(start);
+
+    atomic<bool> solved(false);
+
     vector<pair<int,int>> dirs = {{0,1},{0,-1},{1,0},{-1,0}};
     vector<char> moves = {'D','A','S','W'};
 
-    while (!solved) {
-        State cur;
+    while (!frontier.empty() && !solved) {
+        int frontier_size = frontier.size();
+        vector<State> current_level;
+
+        // Extract all nodes in current BFS level
+        for (int i = 0; i < frontier_size; i++) {
+            current_level.push_back(frontier.front());
+            frontier.pop();
+        }
+
+        vector<State> next_level;
+
+        // Parallelize expansion
+        #pragma omp parallel
         {
-            unique_lock<mutex> lock(q_mutex);
-            cv.wait(lock, [] { return !q.empty() || solved; });
-            if (solved) return;
-            cur = q.front();
-            q.pop();
-        }
+            vector<State> local_next;
 
-        for (int i = 0; i < 4; i++) {
-            State next = try_move(cur, dirs[i].first, dirs[i].second);
-            if (!next.valid) continue;
-            next.path = cur.path + moves[i];
+            #pragma omp for nowait
+            for (int i = 0; i < (int)current_level.size(); i++) {
+                State cur = current_level[i];
 
-            if (is_solved(next)) {
-                cout << next.path << endl;
-                solved = true;
-                cv.notify_all();
-                return;
+                for (int d = 0; d < 4; d++) {
+                    State next = try_move(cur, dirs[d].first, dirs[d].second);
+                    if (!next.valid) continue;
+
+                    next.path = cur.path + moves[d];
+
+                    if (is_solved(next)) {
+                        #pragma omp critical
+                        {
+                            if (!solved) {
+                                cout << next.path << endl;
+                                solved = true;
+                            }
+                        }
+                        continue;
+                    }
+
+                    // visited check (thread-safe)
+                    bool already_seen = false;
+                    #pragma omp critical
+                    {
+                        if (visited.find(next) != visited.end()) {
+                            already_seen = true;
+                        } else {
+                            visited.insert(next);
+                        }
+                    }
+
+                    if (!already_seen) {
+                        local_next.push_back(next);
+                    }
+                }
             }
 
+            // Merge local_next into global next_level
+            #pragma omp critical
             {
-                lock_guard<mutex> lock(visited_mutex);
-                if (visited.find(next) != visited.end()) continue;
-                visited.insert(next);
+                next_level.insert(next_level.end(),
+                                  local_next.begin(), local_next.end());
             }
+        } // end parallel
 
-            {
-                lock_guard<mutex> lock(q_mutex);
-                q.push(next);
-            }
-            cv.notify_one();
+        // push next frontier
+        for (auto &s : next_level) {
+            frontier.push(s);
         }
+    }
+
+    if (!solved) {
+        cout << "No solution found." << endl;
     }
 }
 
+// =================== MAIN ===================
 int main(int argc, char **argv) {
-    string file(argv[1]);
-    State start = loadstate(file);
+    State s = loadstate(argv[1]);
 
-    {
-        lock_guard<mutex> lock(q_mutex);
-        q.push(start);
-        visited.insert(start);
-    }
+    double start_time = omp_get_wtime();
+    solve_parallel(s);
+    double end_time = omp_get_wtime();
 
-    int thread_count = 4;
-    vector<thread> pool;
-    for (int i = 0; i < thread_count; i++)
-        pool.emplace_back(worker);
-
-    cv.notify_all();
-    for (auto &t : pool) t.join();
-
-    if (!solved)
-        cout << "No solution found." << endl;
-
+    //cout << "Elapsed: " << (end_time - start_time) << " sec\n";
     return 0;
 }
 
