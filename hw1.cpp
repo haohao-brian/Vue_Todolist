@@ -1,20 +1,27 @@
-#include <bits/stdc++.h>
-#include <omp.h>
+#include <fstream>
+#include <iostream>
+#include <string>
+#include <vector>
+#include <queue>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
+#include <unordered_set>
 using namespace std;
 
-// =================== STATE DEFINITION ===================
 struct State {
     vector<string> board;
-    pair<int, int> pos;   // player position (y, x)
-    string path;          // moves leading here
+    pair<int,int> pos; 
     bool valid;
+    string path;
 
     bool operator==(const State &other) const {
         return pos == other.pos && board == other.board;
     }
 };
 
-// =================== HASH FUNCTION ===================
+// Custom hash for State
 struct StateHash {
     size_t operator()(const State &s) const {
         size_t seed = 0;
@@ -29,9 +36,16 @@ struct StateHash {
     }
 };
 
-// =================== GAME LOGIC ===================
+// Global
+queue<State> q;
+mutex q_mutex;
+condition_variable cv;
+unordered_set<State, StateHash> visited;
+mutex visited_mutex;
+atomic<bool> solved(false);
+
 State try_move(const State &s, int dy, int dx) {
-	//cout << dy << " " << dx << endl;
+	// cout << dy << " " << dx << endl;
     State result = s;
     result.valid = true;
 
@@ -93,102 +107,73 @@ State loadstate(const string &filename) {
     return s;
 }
 
-// =================== PARALLEL BFS SOLVER ===================
-void solve_parallel(const State &start) {
-    unordered_set<State, StateHash> visited;
-    queue<State> frontier;
-
-    visited.insert(start);
-    frontier.push(start);
-
-    atomic<bool> solved(false);
-
+void worker() {
     vector<pair<int,int>> dirs = {{0,1},{0,-1},{1,0},{-1,0}};
     vector<char> moves = {'D','A','S','W'};
 
-    while (!frontier.empty() && !solved) {
-        int frontier_size = frontier.size();
-        vector<State> current_level;
-
-        // Extract all nodes in current BFS level
-        for (int i = 0; i < frontier_size; i++) {
-            current_level.push_back(frontier.front());
-            frontier.pop();
-        }
-
-        vector<State> next_level;
-
-        // Parallelize expansion
-        #pragma omp parallel
+    while (!solved) {
+        State cur;
         {
-            vector<State> local_next;
-
-            #pragma omp for nowait
-            for (int i = 0; i < (int)current_level.size(); i++) {
-                State cur = current_level[i];
-
-                for (int d = 0; d < 4; d++) {
-                    State next = try_move(cur, dirs[d].first, dirs[d].second);
-                    if (!next.valid) continue;
-
-                    next.path = cur.path + moves[d];
-
-                    if (is_solved(next)) {
-                        #pragma omp critical
-                        {
-                            if (!solved) {
-                                cout << next.path << endl;
-                                solved = true;
-                            }
-                        }
-                        continue;
-                    }
-
-                    // visited check (thread-safe)
-                    bool already_seen = false;
-                    #pragma omp critical
-                    {
-                        if (visited.find(next) != visited.end()) {
-                            already_seen = true;
-                        } else {
-                            visited.insert(next);
-                        }
-                    }
-
-                    if (!already_seen) {
-                        local_next.push_back(next);
-                    }
-                }
-            }
-
-            // Merge local_next into global next_level
-            #pragma omp critical
-            {
-                next_level.insert(next_level.end(),
-                                  local_next.begin(), local_next.end());
-            }
-        } // end parallel
-
-        // push next frontier
-        for (auto &s : next_level) {
-            frontier.push(s);
+            unique_lock<mutex> lock(q_mutex);
+            cv.wait(lock, [] { return !q.empty() || solved; });
+            if (solved) return;
+            cur = q.front();
+            q.pop();
         }
-    }
+		if (solved){
+			return;
+		}
+        for (int i = 0; i < 4; i++) {
+            State next = try_move(cur, dirs[i].first, dirs[i].second);
+            if (!next.valid) continue;
+            next.path = cur.path + moves[i];
 
-    if (!solved) {
-        cout << "No solution found." << endl;
+            if (is_solved(next)) {
+				if (solved){
+					return;
+				}
+                cout << next.path << endl;
+                solved = true;
+                cv.notify_all();
+                return;
+            }
+
+            {
+                lock_guard<mutex> lock(visited_mutex);
+                if (visited.find(next) != visited.end()) continue;
+                visited.insert(next);
+            }
+
+            {
+                lock_guard<mutex> lock(q_mutex);
+                q.push(next);
+            }
+            cv.notify_one();
+        }
     }
 }
 
-// =================== MAIN ===================
 int main(int argc, char **argv) {
-    State s = loadstate(argv[1]);
+    string file(argv[1]);
+    State start = loadstate(file);
 
-    double start_time = omp_get_wtime();
-    solve_parallel(s);
-    double end_time = omp_get_wtime();
+    {
+        lock_guard<mutex> lock(q_mutex);
+        q.push(start);
+        visited.insert(start);
+    }
 
-    //cout << "Elapsed: " << (end_time - start_time) << " sec\n";
+    int thread_count = 40;
+    vector<thread> pool;
+    for (int i = 0; i < thread_count; i++)
+        pool.emplace_back(worker);
+
+    cv.notify_all();
+    for (auto &t : pool) t.join();
+
+    if (!solved)
+        cout << "No solution found." << endl;
+
     return 0;
 }
 
