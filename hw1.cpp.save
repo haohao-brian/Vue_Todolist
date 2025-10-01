@@ -47,7 +47,6 @@ void printState(State s){
             }
 	cout << endl;
 	}
-	cout << "y = " << s.pos.first << ", x = " << s.pos.second << endl;
 	pthread_mutex_unlock(&q_mutex);
 }
 
@@ -97,8 +96,33 @@ State try_move(const State &s, int dy, int dx) {
 bool is_solved(const State &s) {
     for (auto &row : s.board)
         for (char c : row)
-            if (c == 'x') return false;
+            if (c == '.' || c == 'O') return false;
     return true;
+}
+
+// ---------- Deadlock Detection ----------
+bool is_deadlock(const State &s) {
+    int rows = s.board.size();
+    int cols = s.board[0].size();
+
+    for (int y = 1; y < rows - 1; y++) {
+        for (int x = 1; x < cols - 1; x++) {
+            if (s.board[y][x] == 'x' || s.board[y][x] == 'X') {
+                bool wall_up    = (s.board[y-1][x] == '#');
+                bool wall_down  = (s.board[y+1][x] == '#');
+                bool wall_left  = (s.board[y][x-1] == '#');
+                bool wall_right = (s.board[y][x+1] == '#');
+
+                // Box in a corner and not on goal
+                if (((wall_up && wall_left) || (wall_up && wall_right) ||
+                     (wall_down && wall_left) || (wall_down && wall_right)) &&
+                    s.board[y][x] != 'X') {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
 }
 
 // ---------- State Loading ----------
@@ -116,7 +140,7 @@ State loadstate(const string &filename) {
     int y = 0;
     while (getline(file, line)) {
         for (int x = 0; x < (int)line.size(); x++) {
-            if (line[x] == 'o' || line[x] == 'O' || line[x] == '!') {
+            if (line[x] == 'o' || line[x] == 'O' || line[x] == '!' || line[x] == '@') {
                 s.pos = {y, x};
             }
         }
@@ -125,134 +149,6 @@ State loadstate(const string &filename) {
     }
     return s;
 }
-
-// Helper lambdas use the current board; goals are ('.' or 'O' or 'X'), walls are '#'
-bool is_deadlock(const State& s) {
-    const auto& b = s.board;
-    const int R = (int)b.size();
-    const int C = (int)b[0].size();
-    auto inb = [&](int y, int x){ return y>=0 && y<R && x>=0 && x<C; };
-    auto isWall = [&](int y, int x){ return inb(y,x) && b[y][x] == '#'; };
-    auto isGoal = [&](int y, int x){
-        if (!inb(y,x)) return false;
-        char c = b[y][x];
-        // Treat 'X' (box on goal) as a goal cell for taboo computation
-        return (c == '.' || c == 'O' || c == 'X');
-    };
-    auto isFloorLike = [&](int y, int x){
-        return inb(y,x) && b[y][x] != '#';
-    };
-
-    // 1) Taboo grid (false by default)
-    std::vector<std::vector<bool>> taboo(R, std::vector<bool>(C, false));
-
-    // 1a) Corner taboo (non-goal floor-like with two perpendicular walls)
-    for (int y = 1; y < R-1; ++y) {
-        for (int x = 1; x < C-1; ++x) {
-            if (!isFloorLike(y,x) || isGoal(y,x)) continue;
-            bool up = isWall(y-1,x), dn = isWall(y+1,x);
-            bool lf = isWall(y,x-1), rt = isWall(y,x+1);
-            if ((up && lf) || (up && rt) || (dn && lf) || (dn && rt)) {
-                taboo[y][x] = true;
-            }
-        }
-    }
-
-    // Internal helpers to extend taboo along walls between corners that share the same wall side
-    auto extend_horizontal = [&](int y, bool use_top_wall){
-        // scan row y for pairs of "corner cells that also touch the chosen wall side"
-        int x = 1;
-        while (x < C-1) {
-            // find first corner with required side-wall contact
-            while (x < C-1) {
-                if (taboo[y][x] && !isGoal(y,x) &&
-                    (use_top_wall ? isWall(y-1,x) : isWall(y+1,x))) break;
-                ++x;
-            }
-            if (x >= C-1) break;
-            int x1 = x; ++x;
-
-            // find the next corner with same side-wall contact
-            while (x < C-1) {
-                if (taboo[y][x] && !isGoal(y,x) &&
-                    (use_top_wall ? isWall(y-1,x) : isWall(y+1,x))) break;
-                ++x;
-            }
-            if (x >= C-1) break;
-            int x2 = x;
-
-            // check the segment (x1, x2) (excluding corners) sticks to that wall side,
-            // has no internal walls, and contains no goals
-            bool ok = true, has_goal = false;
-            for (int k = x1 + 1; k <= x2 - 1; ++k) {
-                if (!isFloorLike(y,k)) { ok = false; break; }                  // hits a wall inside
-                if (use_top_wall ? !isWall(y-1,k) : !isWall(y+1,k)) { ok=false; break; } // not hugging the same wall
-                if (isGoal(y,k)) has_goal = true;
-            }
-            if (ok && !has_goal) {
-                for (int k = x1 + 1; k <= x2 - 1; ++k)
-                    if (!isGoal(y,k)) taboo[y][k] = true;
-            }
-            // continue search after x2
-            ++x;
-        }
-    };
-
-    auto extend_vertical = [&](int x, bool use_left_wall){
-        int y = 1;
-        while (y < R-1) {
-            while (y < R-1) {
-                if (taboo[y][x] && !isGoal(y,x) &&
-                    (use_left_wall ? isWall(y,x-1) : isWall(y,x+1))) break;
-                ++y;
-            }
-            if (y >= R-1) break;
-            int y1 = y; ++y;
-
-            while (y < R-1) {
-                if (taboo[y][x] && !isGoal(y,x) &&
-                    (use_left_wall ? isWall(y,x-1) : isWall(y,x+1))) break;
-                ++y;
-            }
-            if (y >= R-1) break;
-            int y2 = y;
-
-            bool ok = true, has_goal = false;
-            for (int k = y1 + 1; k <= y2 - 1; ++k) {
-                if (!isFloorLike(k,x)) { ok = false; break; }
-                if (use_left_wall ? !isWall(k,x-1) : !isWall(k,x+1)) { ok=false; break; }
-                if (isGoal(k,x)) has_goal = true;
-            }
-            if (ok && !has_goal) {
-                for (int k = y1 + 1; k <= y2 - 1; ++k)
-                    if (!isGoal(k,x)) taboo[k][x] = true;
-            }
-            ++y;
-        }
-    };
-
-    // 1b) Extend taboo runs along each wall side
-    for (int y = 1; y < R-1; ++y) {
-        extend_horizontal(y, /*use_top_wall=*/true);
-        extend_horizontal(y, /*use_top_wall=*/false);
-    }
-    for (int x = 1; x < C-1; ++x) {
-        extend_vertical(x, /*use_left_wall=*/true);
-        extend_vertical(x, /*use_left_wall=*/false);
-    }
-
-    // 2) If any box 'x' is on a taboo cell, the state is dead
-    for (int y = 1; y < R-1; ++y) {
-        for (int x = 1; x < C-1; ++x) {
-            if (b[y][x] == 'x' && taboo[y][x]) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-
 
 // ---------- Worker Thread ----------
 void* worker(void*) {
@@ -270,13 +166,8 @@ void* worker(void*) {
                 pthread_mutex_unlock(&q_mutex);
                 return nullptr;
             }
-
             cur = q.front();
             q.pop();
-	    while(is_deadlock(cur)){
-		cur = q.front();
-		q.pop();
-	    }
             pthread_mutex_unlock(&q_mutex);
         }
 	printState(cur);
@@ -292,7 +183,7 @@ void* worker(void*) {
 
             if (is_solved(next)) {
                 if (!solved.exchange(true)) {
-                    cout << next.path << endl;
+                    cout << "Solved! Path: " << next.path << endl;
                     pthread_cond_broadcast(&cv);
                 }
                 return nullptr;
@@ -324,14 +215,13 @@ int main(int argc, char **argv) {
 
     string file(argv[1]);
     State start = loadstate(file);
-    //printState(start);
 
     pthread_mutex_lock(&q_mutex);
     q.push(start);
     visited.insert(start);
     pthread_mutex_unlock(&q_mutex);
 
-    int thread_count = 56; // adjust based on machine
+    int thread_count = 8; // adjust based on machine
     vector<pthread_t> threads(thread_count);
     for (int i = 0; i < thread_count; i++) {
         pthread_create(&threads[i], nullptr, worker, nullptr);

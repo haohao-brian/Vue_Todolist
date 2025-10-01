@@ -47,7 +47,6 @@ void printState(State s){
             }
 	cout << endl;
 	}
-	cout << "y = " << s.pos.first << ", x = " << s.pos.second << endl;
 	pthread_mutex_unlock(&q_mutex);
 }
 
@@ -97,7 +96,7 @@ State try_move(const State &s, int dy, int dx) {
 bool is_solved(const State &s) {
     for (auto &row : s.board)
         for (char c : row)
-            if (c == 'x') return false;
+            if (c == '.' || c == 'O') return false;
     return true;
 }
 
@@ -116,7 +115,7 @@ State loadstate(const string &filename) {
     int y = 0;
     while (getline(file, line)) {
         for (int x = 0; x < (int)line.size(); x++) {
-            if (line[x] == 'o' || line[x] == 'O' || line[x] == '!') {
+            if (line[x] == 'o' || line[x] == 'O' || line[x] == '!' || line[x] == '@') {
                 s.pos = {y, x};
             }
         }
@@ -252,8 +251,6 @@ bool is_deadlock(const State& s) {
     return false;
 }
 
-
-
 // ---------- Worker Thread ----------
 void* worker(void*) {
     vector<pair<int,int>> dirs = {{0,1},{0,-1},{1,0},{-1,0}};
@@ -270,13 +267,8 @@ void* worker(void*) {
                 pthread_mutex_unlock(&q_mutex);
                 return nullptr;
             }
-
             cur = q.front();
             q.pop();
-	    while(is_deadlock(cur)){
-		cur = q.front();
-		q.pop();
-	    }
             pthread_mutex_unlock(&q_mutex);
         }
 	printState(cur);
@@ -292,7 +284,7 @@ void* worker(void*) {
 
             if (is_solved(next)) {
                 if (!solved.exchange(true)) {
-                    cout << next.path << endl;
+                    cout << "Solved! Path: " << next.path << endl;
                     pthread_cond_broadcast(&cv);
                 }
                 return nullptr;
@@ -324,14 +316,15 @@ int main(int argc, char **argv) {
 
     string file(argv[1]);
     State start = loadstate(file);
-    //printState(start);
 
+    cout << is_deadlock(start) << endl;
+/*
     pthread_mutex_lock(&q_mutex);
     q.push(start);
     visited.insert(start);
     pthread_mutex_unlock(&q_mutex);
 
-    int thread_count = 56; // adjust based on machine
+    int thread_count = 8; // adjust based on machine
     vector<pthread_t> threads(thread_count);
     for (int i = 0; i < thread_count; i++) {
         pthread_create(&threads[i], nullptr, worker, nullptr);
@@ -345,7 +338,7 @@ int main(int argc, char **argv) {
 
     if (!solved)
         cout << "No solution found." << endl;
-
+*/
     return 0;
 }
 

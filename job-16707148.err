@@ -1,0 +1,2 @@
+/var/spool/slurm/d/job16707148/slurm_script: line 14: 1821875 Killed                  ./hw1 samples/05.txt > a.output
+slurmstepd: error: Detected 1 oom-kill event(s) in step 16707148.batch cgroup. Some of your processes may have been killed by the cgroup out-of-memory handler.
