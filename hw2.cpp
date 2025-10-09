@@ -94,37 +94,40 @@ int main(int argc, char* argv[])
         packed_local.push_back(pack_keypoint(kp));
     }
 
-    int local_bytes = static_cast<int>(packed_local.size() * sizeof(PackedKeypoint));
-    std::vector<int> recv_counts;
-    if (mpi_rank == 0) {
-        recv_counts.resize(mpi_size, 0);
-    }
+    int local_count = static_cast<int>(packed_local.size());
+    int global_count = 0;
+    MPI_Allreduce(&local_count, &global_count, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
 
-    MPI_Gather(&local_bytes, 1, MPI_INT,
+    MPI_Datatype mpi_packed_kp;
+    MPI_Type_contiguous(static_cast<int>(sizeof(PackedKeypoint)), MPI_BYTE, &mpi_packed_kp);
+    MPI_Type_commit(&mpi_packed_kp);
+
+    std::vector<int> recv_counts(mpi_rank == 0 ? mpi_size : 0, 0);
+    MPI_Gather(&local_count, 1, MPI_INT,
                mpi_rank == 0 ? recv_counts.data() : nullptr, 1, MPI_INT,
                0, MPI_COMM_WORLD);
 
     std::vector<int> displs;
-    int total_bytes = 0;
+    int total_count = 0;
+    std::vector<PackedKeypoint> packed_global;
     if (mpi_rank == 0) {
         displs.resize(mpi_size, 0);
-        for (int idx = 0; idx < mpi_size; ++idx) {
-            displs[idx] = total_bytes;
-            total_bytes += recv_counts[idx];
+        for (int idx = 1; idx < mpi_size; ++idx) {
+            displs[idx] = displs[idx-1] + recv_counts[idx-1];
+        }
+        if (!recv_counts.empty()) {
+            total_count = displs.back() + recv_counts.back();
+            packed_global.resize(total_count);
         }
     }
 
-    std::vector<PackedKeypoint> packed_global;
-    if (mpi_rank == 0 && total_bytes > 0) {
-        int total_keypoints = total_bytes / static_cast<int>(sizeof(PackedKeypoint));
-        packed_global.resize(total_keypoints);
-    }
-
-    MPI_Gatherv(packed_local.empty() ? nullptr : packed_local.data(), local_bytes, MPI_BYTE,
+    MPI_Gatherv(packed_local.empty() ? nullptr : packed_local.data(), local_count, mpi_packed_kp,
                 (mpi_rank == 0 && !packed_global.empty()) ? packed_global.data() : nullptr,
                 mpi_rank == 0 ? recv_counts.data() : nullptr,
                 mpi_rank == 0 ? displs.data() : nullptr,
-                MPI_BYTE, 0, MPI_COMM_WORLD);
+                mpi_packed_kp, 0, MPI_COMM_WORLD);
+
+    MPI_Type_free(&mpi_packed_kp);
 
     std::vector<Keypoint> kps;
     if (mpi_rank == 0 && !packed_global.empty()) {
@@ -166,7 +169,11 @@ int main(int argc, char* argv[])
     std::chrono::duration<double, std::milli> duration = end - start;
     if (mpi_rank == 0) {
         std::cout << "Execution time: " << duration.count() << " ms\n";
-        std::cout << "Found " << kps.size() << " keypoints.\n";
+        std::cout << "Found " << kps.size() << " keypoints (global count: "
+                  << global_count << ").\n";
+        if (global_count == 0) {
+            std::cerr << "Warning: no keypoints detected across MPI ranks.\n";
+        }
     }
 
     MPI_Finalize();
