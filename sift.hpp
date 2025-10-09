@@ -61,7 +61,8 @@ ScaleSpacePyramid generate_gaussian_pyramid(const Image& img, float sigma_min=SI
 ScaleSpacePyramid generate_dog_pyramid(const ScaleSpacePyramid& img_pyramid);
 
 std::vector<Keypoint> find_keypoints(const ScaleSpacePyramid& dog_pyramid,
-                                     float contrast_thresh=C_DOG, float edge_thresh=C_EDGE);
+                                     float contrast_thresh=C_DOG, float edge_thresh=C_EDGE,
+                                     int octave_start=0, int octave_end=-1);
 
 ScaleSpacePyramid generate_gradient_pyramid(const ScaleSpacePyramid& pyramid);
 
@@ -77,7 +78,9 @@ std::vector<Keypoint> find_keypoints_and_descriptors(const Image& img, float sig
                                                      float contrast_thresh=C_DOG,
                                                      float edge_thresh=C_EDGE,
                                                      float lambda_ori=LAMBDA_ORI,
-                                                     float lambda_desc=LAMBDA_DESC);
+                                                     float lambda_desc=LAMBDA_DESC,
+                                                     int mpi_rank=0,
+                                                     int mpi_size=1);
                                                      
 Image draw_keypoints(const Image& img, const std::vector<Keypoint>& kps);
 
