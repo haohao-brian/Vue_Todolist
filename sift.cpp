@@ -10,7 +10,7 @@
 #include "sift.hpp"
 #include "image.hpp"
 
-
+#include <chrono>
 
 ScaleSpacePyramid generate_gaussian_pyramid(const Image& img, float sigma_min,
                                             int num_octaves, int scales_per_octave)
@@ -40,18 +40,23 @@ ScaleSpacePyramid generate_gaussian_pyramid(const Image& img, float sigma_min,
         imgs_per_octave,
         std::vector<std::vector<Image>>(num_octaves)
     };
+    
     for (int i = 0; i < num_octaves; i++) {
         pyramid.octaves[i].reserve(imgs_per_octave);
         pyramid.octaves[i].push_back(std::move(base_img));
+        //int threads = omp_get_max_threads();
         for (int j = 1; j < sigma_vals.size(); j++) {
             const Image& prev_img = pyramid.octaves[i].back();
+            
             pyramid.octaves[i].push_back(gaussian_blur(prev_img, sigma_vals[j]));
         }
+
         // prepare base image for next octave
         const Image& next_base_img = pyramid.octaves[i][imgs_per_octave-3];
         base_img = next_base_img.resize(next_base_img.width/2, next_base_img.height/2,
                                         Interpolation::NEAREST);
     }
+    
     return pyramid;
 }
 
@@ -449,15 +454,46 @@ std::vector<Keypoint> find_keypoints_and_descriptors(const Image& img, float sig
                                                      float contrast_thresh, float edge_thresh, 
                                                      float lambda_ori, float lambda_desc)
 {
+    auto start = std::chrono::high_resolution_clock::now();
+
     assert(img.channels == 1 || img.channels == 3);
 
     const Image& input = img.channels == 1 ? img : rgb_to_grayscale(img);
+
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> duration = end - start;
+    std::cout << "rgb_to_grayscale-Execution time: " << duration.count() << " ms\n";
+    start = std::chrono::high_resolution_clock::now();
+    
     ScaleSpacePyramid gaussian_pyramid = generate_gaussian_pyramid(input, sigma_min, num_octaves,
                                                                    scales_per_octave);
+                                                                   
+    end = std::chrono::high_resolution_clock::now();
+    duration = end - start;
+    std::cout << "generate_gaussian_pyramid-Execution time: " << duration.count() << " ms\n";
+    start = std::chrono::high_resolution_clock::now();
+
     ScaleSpacePyramid dog_pyramid = generate_dog_pyramid(gaussian_pyramid);
+    
+    end = std::chrono::high_resolution_clock::now();
+    duration = end - start;
+    std::cout << "generate_dog_pyramid-Execution time: " << duration.count() << " ms\n";
+    start = std::chrono::high_resolution_clock::now();
+
     std::vector<Keypoint> tmp_kps = find_keypoints(dog_pyramid, contrast_thresh, edge_thresh);
+    
+    end = std::chrono::high_resolution_clock::now();
+    duration = end - start;
+    std::cout << "find_keypoints-Execution time: " << duration.count() << " ms\n";
+    start = std::chrono::high_resolution_clock::now();
+    
     ScaleSpacePyramid grad_pyramid = generate_gradient_pyramid(gaussian_pyramid);
     
+    end = std::chrono::high_resolution_clock::now();
+    duration = end - start;
+    std::cout << "generate_gradient_pyramid-Execution time: " << duration.count() << " ms\n";
+    start = std::chrono::high_resolution_clock::now();
+
     std::vector<Keypoint> kps;
 
     for (Keypoint& kp_tmp : tmp_kps) {
@@ -469,6 +505,10 @@ std::vector<Keypoint> find_keypoints_and_descriptors(const Image& img, float sig
             kps.push_back(kp);
         }
     }
+    end = std::chrono::high_resolution_clock::now();
+    duration = end - start;
+    std::cout << "for loop-Execution time: " << duration.count() << " ms\n";
+    start = std::chrono::high_resolution_clock::now();
     return kps;
 }
 

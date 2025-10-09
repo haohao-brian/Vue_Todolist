@@ -194,6 +194,109 @@ Image Image::resize(int new_w, int new_h, Interpolation method) const
     }
     return resized;
 }
+std::array<Image, 4> separate_quadrants(const Image& img)
+{
+    int left_w = img.width / 2;
+    int right_w = img.width - left_w;
+    int top_h = img.height / 2;
+    int bottom_h = img.height - top_h;
+    int channels = img.channels;
+
+    std::array<Image, 4> quadrants = {
+        Image(left_w, top_h, channels),
+        Image(right_w, top_h, channels),
+        Image(left_w, bottom_h, channels),
+        Image(right_w, bottom_h, channels)
+    };
+
+    for (int x = 0; x < left_w; ++x) {
+        for (int y = 0; y < top_h; ++y) {
+            for (int c = 0; c < channels; ++c) {
+                quadrants[0].set_pixel(x, y, c, img.get_pixel(x, y, c));
+            }
+        }
+    }
+
+    for (int x = 0; x < right_w; ++x) {
+        for (int y = 0; y < top_h; ++y) {
+            for (int c = 0; c < channels; ++c) {
+                quadrants[1].set_pixel(x, y, c, img.get_pixel(x + left_w, y, c));
+            }
+        }
+    }
+
+    for (int x = 0; x < left_w; ++x) {
+        for (int y = 0; y < bottom_h; ++y) {
+            for (int c = 0; c < channels; ++c) {
+                quadrants[2].set_pixel(x, y, c, img.get_pixel(x, y + top_h, c));
+            }
+        }
+    }
+
+    for (int x = 0; x < right_w; ++x) {
+        for (int y = 0; y < bottom_h; ++y) {
+            for (int c = 0; c < channels; ++c) {
+                quadrants[3].set_pixel(x, y, c, img.get_pixel(x + left_w, y + top_h, c));
+            }
+        }
+    }
+
+    return quadrants;
+}
+
+Image merge_quadrants(const std::array<Image, 4>& quadrants)
+{
+    int channels = quadrants[0].channels;
+
+    assert(quadrants[1].channels == channels);
+    assert(quadrants[2].channels == channels);
+    assert(quadrants[3].channels == channels);
+    assert(quadrants[0].height == quadrants[1].height);
+    assert(quadrants[2].height == quadrants[3].height);
+    assert(quadrants[0].width == quadrants[2].width);
+    assert(quadrants[1].width == quadrants[3].width);
+
+    int left_w = quadrants[0].width;
+    int right_w = quadrants[1].width;
+    int top_h = quadrants[0].height;
+    int bottom_h = quadrants[2].height;
+
+    Image merged(left_w + right_w, top_h + bottom_h, channels);
+
+    for (int x = 0; x < left_w; ++x) {
+        for (int y = 0; y < top_h; ++y) {
+            for (int c = 0; c < channels; ++c) {
+                merged.set_pixel(x, y, c, quadrants[0].get_pixel(x, y, c));
+            }
+        }
+    }
+
+    for (int x = 0; x < right_w; ++x) {
+        for (int y = 0; y < top_h; ++y) {
+            for (int c = 0; c < channels; ++c) {
+                merged.set_pixel(x + left_w, y, c, quadrants[1].get_pixel(x, y, c));
+            }
+        }
+    }
+
+    for (int x = 0; x < left_w; ++x) {
+        for (int y = 0; y < bottom_h; ++y) {
+            for (int c = 0; c < channels; ++c) {
+                merged.set_pixel(x, y + top_h, c, quadrants[2].get_pixel(x, y, c));
+            }
+        }
+    }
+
+    for (int x = 0; x < right_w; ++x) {
+        for (int y = 0; y < bottom_h; ++y) {
+            for (int c = 0; c < channels; ++c) {
+                merged.set_pixel(x + left_w, y + top_h, c, quadrants[3].get_pixel(x, y, c));
+            }
+        }
+    }
+
+    return merged;
+}
 
 float bilinear_interpolate(const Image& img, float x, float y, int c)
 {

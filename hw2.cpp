@@ -25,9 +25,10 @@ int main(int argc, char *argv[])
     auto start = std::chrono::high_resolution_clock::now();
     
     Image img(input_img);
-    img =  img.channels == 1 ? img : rgb_to_grayscale(img);
-
-    std::vector<Keypoint> kps = find_keypoints_and_descriptors(img);
+    img = img.channels == 1 ? img : rgb_to_grayscale(img);
+    auto quadrants = separate_quadrants(img);
+    Image img2 = merge_quadrants(quadrants);
+    std::vector<Keypoint> kps = find_keypoints_and_descriptors(img2);
 
 
     /////////////////////////////////////////////////////////////
