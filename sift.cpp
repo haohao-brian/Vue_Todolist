@@ -71,11 +71,14 @@ ScaleSpacePyramid generate_gaussian_pyramid(const Image& img, float sigma_min,
 
     // determine sigma values for bluring
     float k = std::pow(2, 1.0/scales_per_octave);
-    std::vector<float> sigma_vals {base_sigma};
+    //std::vector<float> sigma_vals {base_sigma};
+    std::vector<float> sigma_vals(imgs_per_octave);
+    sigma_vals[0] = base_sigma;
     for (int i = 1; i < imgs_per_octave; i++) {
         float sigma_prev = base_sigma * std::pow(k, i-1);
         float sigma_total = k * sigma_prev;
-        sigma_vals.push_back(std::sqrt(sigma_total*sigma_total - sigma_prev*sigma_prev));
+        //sigma_vals.push_back(std::sqrt(sigma_total*sigma_total - sigma_prev*sigma_prev));
+        sigma_vals[i] = std::sqrt(sigma_total*sigma_total - sigma_prev*sigma_prev);
     }
 
     // create a scale space pyramid of gaussian images
