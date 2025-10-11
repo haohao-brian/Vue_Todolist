@@ -22,6 +22,7 @@ Image::Image(std::string file_path)
 
     size = width * height * channels;
     data = new float[size]; 
+    #pragma omp parallel for collapse(2)
     for (int x = 0; x < width; x++) {
         for (int y = 0; y < height; y++) {
             for (int c = 0; c < channels; c++) {
@@ -67,6 +68,7 @@ Image::Image(const Image& other)
      data {new float[other.size]}
 {
     //std::cout << "copy constructor\n";
+    //#pragma omp parallel for
     for (int i = 0; i < size; i++)
         data[i] = other.data[i];
 }
@@ -118,6 +120,7 @@ Image& Image::operator=(Image&& other)
 bool Image::save(std::string file_path)
 {
     unsigned char *out_data = new unsigned char[width*height*channels]; 
+    #pragma omp parallel for collapse(2)
     for (int x = 0; x < width; x++) {
         for (int y = 0; y < height; y++) {
             for (int c = 0; c < channels; c++) {
@@ -160,6 +163,7 @@ float Image::get_pixel(int x, int y, int c) const
 void Image::clamp()
 {
     int size = width * height * channels;
+    #pragma omp parallel for
     for (int i = 0; i < size; i++) {
         float val = data[i];
         val = (val > 1.0) ? 1.0 : val;
@@ -180,6 +184,7 @@ Image Image::resize(int new_w, int new_h, Interpolation method) const
 {
     Image resized(new_w, new_h, this->channels);
     float value = 0;
+    #pragma omp parallel for collapse(2)
     for (int x = 0; x < new_w; x++) {
         for (int y = 0; y < new_h; y++) {
             for (int c = 0; c < resized.channels; c++) {
@@ -209,7 +214,7 @@ std::array<Image, 4> separate_quadrants(const Image& img)
         Image(left_w, bottom_h, channels),
         Image(right_w, bottom_h, channels)
     };
-
+    #pragma omp parallel for collapse(2)
     for (int x = 0; x < left_w; ++x) {
         for (int y = 0; y < top_h; ++y) {
             for (int c = 0; c < channels; ++c) {
@@ -218,6 +223,7 @@ std::array<Image, 4> separate_quadrants(const Image& img)
         }
     }
 
+    #pragma omp parallel for collapse(2)
     for (int x = 0; x < right_w; ++x) {
         for (int y = 0; y < top_h; ++y) {
             for (int c = 0; c < channels; ++c) {
@@ -226,6 +232,7 @@ std::array<Image, 4> separate_quadrants(const Image& img)
         }
     }
 
+    #pragma omp parallel for collapse(2)
     for (int x = 0; x < left_w; ++x) {
         for (int y = 0; y < bottom_h; ++y) {
             for (int c = 0; c < channels; ++c) {
@@ -234,6 +241,7 @@ std::array<Image, 4> separate_quadrants(const Image& img)
         }
     }
 
+    #pragma omp parallel for collapse(2)
     for (int x = 0; x < right_w; ++x) {
         for (int y = 0; y < bottom_h; ++y) {
             for (int c = 0; c < channels; ++c) {
@@ -266,7 +274,7 @@ Image merge_quadrants(const std::array<Image, 4>& quadrants)
     int height = top_h+bottom_h - 20 - 20;
     //Image merged(left_w + right_w-20, top_h + bottom_h-20, channels);
     Image merged(width, height, channels);
-
+    #pragma omp parallel for collapse(2)
     for (int x = 0; x < left_w-20; ++x) {
         for (int y = 0; y < top_h-20; ++y) {
             for (int c = 0; c < channels; ++c) {
@@ -275,6 +283,7 @@ Image merge_quadrants(const std::array<Image, 4>& quadrants)
         }
     }
 
+    #pragma omp parallel for collapse(2)
     for (int x = 20; x < right_w; ++x) {
         for (int y = 0; y < top_h; ++y) {
             for (int c = 0; c < channels; ++c) {
@@ -283,6 +292,7 @@ Image merge_quadrants(const std::array<Image, 4>& quadrants)
         }
     }
 
+    #pragma omp parallel for collapse(2)
     for (int x = 0; x < left_w; ++x) {
         for (int y = 20; y < bottom_h; ++y) {
             for (int c = 0; c < channels; ++c) {
@@ -291,6 +301,7 @@ Image merge_quadrants(const std::array<Image, 4>& quadrants)
         }
     }
 
+    #pragma omp parallel for collapse(2)
     for (int x = 20; x < right_w; ++x) {
         for (int y = 20; y < bottom_h; ++y) {
             for (int c = 0; c < channels; ++c) {
@@ -325,6 +336,7 @@ Image rgb_to_grayscale(const Image& img)
 {
     assert(img.channels == 3);
     Image gray(img.width, img.height, 1);
+    #pragma omp parallel for collapse(2)
     for (int x = 0; x < img.width; x++) {
         for (int y = 0; y < img.height; y++) {
             float red, green, blue;
@@ -341,6 +353,7 @@ Image grayscale_to_rgb(const Image& img)
 {
     assert(img.channels == 1);
     Image rgb(img.width, img.height, 3);
+    #pragma omp parallel for collapse(2)
     for (int x = 0; x < img.width; x++) {
         for (int y = 0; y < img.height; y++) {
             float gray_val = img.get_pixel(x, y, 0);
@@ -363,11 +376,14 @@ Image gaussian_blur(const Image& img, float sigma)
     int center = size / 2;
     Image kernel(size, 1, 1);
     float sum = 0;
+    #pragma omp parallel for
     for (int k = -size/2; k <= size/2; k++) {
         float val = std::exp(-(k*k) / (2*sigma*sigma));
         kernel.set_pixel(center+k, 0, 0, val);
+        #pragma omp critical
         sum += val;
     }
+    //#pragma omp parallel for
     for (int k = 0; k < size; k++)
         kernel.data[k] /= sum;
 
@@ -403,6 +419,7 @@ Image gaussian_blur(const Image& img, float sigma)
 
 void draw_point(Image& img, int x, int y, int size)
 {
+    #pragma omp parallel for collapse(2)
     for (int i = x-size/2; i <= x+size/2; i++) {
         for (int j = y-size/2; j <= y+size/2; j++) {
             if (i < 0 || i >= img.width) continue;
@@ -426,6 +443,7 @@ void draw_line(Image& img, int x1, int y1, int x2, int y2)
         std::swap(y1, y2);
     }
     int dx = x2 - x1, dy = y2 - y1;
+    #pragma omp parallel for
     for (int x = x1; x < x2; x++) {
         int y = y1 + dy*(x-x1)/dx;
         if (img.channels == 3) {
