@@ -375,6 +375,7 @@ Image gaussian_blur(const Image& img, float sigma)
     Image filtered(img.width, img.height, 1);
 
     // convolve vertical
+    #pragma omp parallel for collapse(2)
     for (int x = 0; x < img.width; x++) {
         for (int y = 0; y < img.height; y++) {
             float sum = 0;
@@ -386,6 +387,7 @@ Image gaussian_blur(const Image& img, float sigma)
         }
     }
     // convolve horizontal
+    #pragma omp parallel for collapse(2)
     for (int x = 0; x < img.width; x++) {
         for (int y = 0; y < img.height; y++) {
             float sum = 0;
