@@ -1,3 +1,4 @@
+#include <array>
 #include <cmath>
 #include <iostream>
 #include <cassert>
@@ -196,10 +197,10 @@ Image Image::resize(int new_w, int new_h, Interpolation method) const
 }
 std::array<Image, 4> separate_quadrants(const Image& img)
 {
-    int left_w = img.width / 2;
-    int right_w = img.width - left_w;
-    int top_h = img.height / 2;
-    int bottom_h = img.height - top_h;
+    int left_w = img.width / 2 + 20;
+    int right_w = img.width - img.width / 2 + 20;
+    int top_h = img.height / 2 + 20;
+    int bottom_h = img.height - img.height/2 + 20;
     int channels = img.channels;
 
     std::array<Image, 4> quadrants = {
@@ -220,7 +221,7 @@ std::array<Image, 4> separate_quadrants(const Image& img)
     for (int x = 0; x < right_w; ++x) {
         for (int y = 0; y < top_h; ++y) {
             for (int c = 0; c < channels; ++c) {
-                quadrants[1].set_pixel(x, y, c, img.get_pixel(x + left_w, y, c));
+                quadrants[1].set_pixel(x, y, c, img.get_pixel(x + img.width - right_w, y, c));
             }
         }
     }
@@ -228,7 +229,7 @@ std::array<Image, 4> separate_quadrants(const Image& img)
     for (int x = 0; x < left_w; ++x) {
         for (int y = 0; y < bottom_h; ++y) {
             for (int c = 0; c < channels; ++c) {
-                quadrants[2].set_pixel(x, y, c, img.get_pixel(x, y + top_h, c));
+                quadrants[2].set_pixel(x, y, c, img.get_pixel(x, y + img.height - bottom_h, c));
             }
         }
     }
@@ -236,7 +237,7 @@ std::array<Image, 4> separate_quadrants(const Image& img)
     for (int x = 0; x < right_w; ++x) {
         for (int y = 0; y < bottom_h; ++y) {
             for (int c = 0; c < channels; ++c) {
-                quadrants[3].set_pixel(x, y, c, img.get_pixel(x + left_w, y + top_h, c));
+                quadrants[3].set_pixel(x, y, c, img.get_pixel(x + img.width - right_w, y + img.height - bottom_h, c));
             }
         }
     }
@@ -261,36 +262,39 @@ Image merge_quadrants(const std::array<Image, 4>& quadrants)
     int top_h = quadrants[0].height;
     int bottom_h = quadrants[2].height;
 
-    Image merged(left_w + right_w, top_h + bottom_h, channels);
+    int width = left_w+right_w - 20 - 20;
+    int height = top_h+bottom_h - 20 - 20;
+    //Image merged(left_w + right_w-20, top_h + bottom_h-20, channels);
+    Image merged(width, height, channels);
 
-    for (int x = 0; x < left_w; ++x) {
-        for (int y = 0; y < top_h; ++y) {
+    for (int x = 0; x < left_w-20; ++x) {
+        for (int y = 0; y < top_h-20; ++y) {
             for (int c = 0; c < channels; ++c) {
                 merged.set_pixel(x, y, c, quadrants[0].get_pixel(x, y, c));
             }
         }
     }
 
-    for (int x = 0; x < right_w; ++x) {
+    for (int x = 20; x < right_w; ++x) {
         for (int y = 0; y < top_h; ++y) {
             for (int c = 0; c < channels; ++c) {
-                merged.set_pixel(x + left_w, y, c, quadrants[1].get_pixel(x, y, c));
+                merged.set_pixel(x + width - right_w, y, c, quadrants[1].get_pixel(x, y, c));
             }
         }
     }
 
     for (int x = 0; x < left_w; ++x) {
-        for (int y = 0; y < bottom_h; ++y) {
+        for (int y = 20; y < bottom_h; ++y) {
             for (int c = 0; c < channels; ++c) {
-                merged.set_pixel(x, y + top_h, c, quadrants[2].get_pixel(x, y, c));
+                merged.set_pixel(x, y + height - bottom_h, c, quadrants[2].get_pixel(x, y, c));
             }
         }
     }
 
-    for (int x = 0; x < right_w; ++x) {
-        for (int y = 0; y < bottom_h; ++y) {
+    for (int x = 20; x < right_w; ++x) {
+        for (int y = 20; y < bottom_h; ++y) {
             for (int c = 0; c < channels; ++c) {
-                merged.set_pixel(x + left_w, y + top_h, c, quadrants[3].get_pixel(x, y, c));
+                merged.set_pixel(x + width - right_w, y + height - bottom_h, c, quadrants[3].get_pixel(x, y, c));
             }
         }
     }
@@ -431,3 +435,4 @@ void draw_line(Image& img, int x1, int y1, int x2, int y2)
         }
     }
 }
+

@@ -25,6 +25,8 @@ struct Image {
     void clamp();
     Image resize(int new_w, int new_h, Interpolation method = BILINEAR) const;
 };
+std::array<Image, 4> separate_quadrants(const Image& img);
+Image merge_quadrants(const std::array<Image, 4>& quadrants);
 
 std::array<Image, 4> separate_quadrants(const Image& img);
 Image merge_quadrants(const std::array<Image, 4>& quadrants);

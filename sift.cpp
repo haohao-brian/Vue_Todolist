@@ -48,7 +48,24 @@ ScaleSpacePyramid generate_gaussian_pyramid(const Image& img, float sigma_min,
         for (int j = 1; j < sigma_vals.size(); j++) {
             const Image& prev_img = pyramid.octaves[i].back();
             
-            pyramid.octaves[i].push_back(gaussian_blur(prev_img, sigma_vals[j]));
+            std::array<Image,4> quadrants = separate_quadrants(prev_img);
+            //Image blurred = merge_quadrants({
+            //    quadrants[0], quadrants[1], quadrants[2], quadrants[3]});
+            Image q0,q1,q2,q3;
+
+            #pragma omp task shared(q0)
+            q0 = gaussian_blur(quadrants[0], sigma_vals[j]);
+            #pragma omp task shared(q1)
+            q1 = gaussian_blur(quadrants[1], sigma_vals[j]);
+            #pragma omp task shared(q2)
+            q2 = gaussian_blur(quadrants[2], sigma_vals[j]);
+            #pragma omp task shared(q3)
+            q3 = gaussian_blur(quadrants[3], sigma_vals[j]);
+            #pragma omp taskwait
+            const Image& blurred = merge_quadrants({q0, q1, q2, q3});
+
+            pyramid.octaves[i].push_back(blurred);
+//gaussian_blur(blurred, sigma_vals[j]));
         }
 
         // prepare base image for next octave
