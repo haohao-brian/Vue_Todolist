@@ -55,6 +55,7 @@ ScaleSpacePyramid generate_gaussian_pyramid(const Image& img, float sigma_min,
         q1[0] = sep[1];
         q2[0] = sep[2];
         q3[0] = sep[3];
+        //std::cout << q1[0].size << std::endl;
         #pragma omp task shared(q0)
         {
             for (int j = 1; j < sigma_vals.size(); j++) {
@@ -73,25 +74,31 @@ ScaleSpacePyramid generate_gaussian_pyramid(const Image& img, float sigma_min,
                 q2[j] = gaussian_blur(q2[j-1], sigma_vals[j]);
             }
         }
-//        #pragma omp task shared(q3)
+        #pragma omp task shared(q3)
         {
             for (int j = 1; j < sigma_vals.size(); j++) {
                 q3[j] = gaussian_blur(q3[j-1], sigma_vals[j]);
             }
         }
         {
+            #pragma omp for
             for (int j = 1; j < sigma_vals.size(); j++) {
-//                if (j==imgs_per_octave-3){
+                while(q0[j].size==0||q1[j].size==0||q2[j].size==0||q3[j].size==0){
+                    continue;
+                }
+                {
                     const Image& blurred = merge_quadrants({q0[j], q1[j], q2[j], q3[j]});
                     pyramid.octaves[i].push_back(blurred);
-  //              }else{
-//                    const Image& blurred = merge_quadrants({q0[j], q1[j], q2[j], q3[j]});
-  //                  pyramid.octaves[i].push_back(q0[j]);
-    //            }
+                }
             }
         }
+//        #pragma omp taskwait
         // prepare base image for next octave
-        const Image& next_base_img = pyramid.octaves[i][imgs_per_octave-3];
+        while(q0[imgs_per_octave-3].size==0||q1[imgs_per_octave-3].size==0||q2[imgs_per_octave-3].size==0||q3[imgs_per_octave-3].size==0){
+            continue;
+        }
+        const Image& next_base_img = merge_quadrants({q0[imgs_per_octave-3], q1[imgs_per_octave-3], q2[imgs_per_octave-3], q3[imgs_per_octave-3]});
+        //const Image& next_base_img = pyramid.octaves[i][imgs_per_octave-3];
         base_img = next_base_img.resize(next_base_img.width/2, next_base_img.height/2,
                                         Interpolation::NEAREST);
     }
@@ -108,10 +115,8 @@ ScaleSpacePyramid generate_dog_pyramid(const ScaleSpacePyramid& img_pyramid)
     };
     for (int i = 0; i < dog_pyramid.num_octaves; i++) {
         dog_pyramid.octaves[i].reserve(dog_pyramid.imgs_per_octave);
-        //#pragma omp parallel for
         for (int j = 1; j < img_pyramid.imgs_per_octave; j++) {
             Image diff = img_pyramid.octaves[i][j];
-            #pragma omp parallel for
             for (int pix_idx = 0; pix_idx < diff.size; pix_idx++) {
                 diff.data[pix_idx] -= img_pyramid.octaves[i][j-1].data[pix_idx];
             }
@@ -129,8 +134,7 @@ bool point_is_extremum(const std::vector<Image>& octave, int scale, int x, int y
 
     bool is_min = true, is_max = true;
     float val = img.get_pixel(x, y, 0), neighbor;
-    bool res = true;
-//    #pragma omp parallel for shared(res)
+
     for (int dx : {-1,0,1}) {
         for (int dy : {-1,0,1}) {
             neighbor = prev.get_pixel(x+dx, y+dy, 0);
@@ -144,11 +148,11 @@ bool point_is_extremum(const std::vector<Image>& octave, int scale, int x, int y
             neighbor = img.get_pixel(x+dx, y+dy, 0);
             if (neighbor > val) is_max = false;
             if (neighbor < val) is_min = false;
-  //          #pragma omp critical
+
             if (!is_min && !is_max) return false;
         }
     }
-    return res;
+    return true;
 }
 
 // fit a quadratic near the discrete extremum,
@@ -268,7 +272,6 @@ std::vector<Keypoint> find_keypoints(const ScaleSpacePyramid& dog_pyramid, float
         const std::vector<Image>& octave = dog_pyramid.octaves[i];
         for (int j = 1; j < dog_pyramid.imgs_per_octave-1; j++) {
             const Image& img = octave[j];
-            //#pragma omp parallel for //collapse(2)
             for (int x = 1; x < img.width-1; x++) {
                 for (int y = 1; y < img.height-1; y++) {
                     if (std::abs(img.get_pixel(x, y, 0)) < 0.8*contrast_thresh) {
@@ -297,16 +300,13 @@ ScaleSpacePyramid generate_gradient_pyramid(const ScaleSpacePyramid& pyramid)
         pyramid.imgs_per_octave,
         std::vector<std::vector<Image>>(pyramid.num_octaves)
     };
-    #pragma omp parallel for
     for (int i = 0; i < pyramid.num_octaves; i++) {
         grad_pyramid.octaves[i].reserve(grad_pyramid.imgs_per_octave);
         int width = pyramid.octaves[i][0].width;
         int height = pyramid.octaves[i][0].height;
-        #pragma omp parallel for schedule(static)
         for (int j = 0; j < pyramid.imgs_per_octave; j++) {
             Image grad(width, height, 2);
             float gx, gy;
-            #pragma omp parallel for collapse(2) private(gx,gy)
             for (int x = 1; x < grad.width-1; x++) {
                 for (int y = 1; y < grad.height-1; y++) {
                     gx = (pyramid.octaves[i][j].get_pixel(x+1, y, 0)
@@ -573,7 +573,6 @@ Image draw_keypoints(const Image& img, const std::vector<Keypoint>& kps)
     if (img.channels == 1) {
         res = grayscale_to_rgb(res);
     }
-    #pragma omp for
     for (auto& kp : kps) {
         draw_point(res, kp.x, kp.y, 5);
     }
