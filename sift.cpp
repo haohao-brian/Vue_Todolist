@@ -12,51 +12,6 @@
 
 #include <chrono>
 
-std::array<ScaleSpacePyramid, 4> pyramid_separate(const ScaleSpacePyramid& pyramid)
-{
-    std::array<ScaleSpacePyramid, 4> parts;
-    for (auto& part : parts) {
-        part.num_octaves = pyramid.num_octaves;
-        part.imgs_per_octave = pyramid.imgs_per_octave;
-        part.octaves.assign(pyramid.num_octaves, std::vector<Image>(pyramid.imgs_per_octave));
-    }
-
-    for (int octave = 0; octave < pyramid.num_octaves; ++octave) {
-        for (int scale = 0; scale < pyramid.imgs_per_octave; ++scale) {
-            const Image& img = pyramid.octaves[octave][scale];
-            std::array<Image, 4> quadrants = separate_quadrants(img);
-            for (int k = 0; k < 4; ++k) {
-                parts[k].octaves[octave][scale] = quadrants[k];
-            }
-        }
-    }
-    return parts;
-}
-
-ScaleSpacePyramid pyramid_merge(const std::array<ScaleSpacePyramid, 4>& parts)
-{
-    assert(parts.size() == 4);
-
-    ScaleSpacePyramid merged = {
-        parts[0].num_octaves,
-        parts[0].imgs_per_octave,
-        std::vector<std::vector<Image>>(parts[0].num_octaves,
-                                        std::vector<Image>(parts[0].imgs_per_octave))
-    };
-
-    for (int octave = 0; octave < merged.num_octaves; ++octave) {
-        for (int scale = 0; scale < merged.imgs_per_octave; ++scale) {
-            std::array<Image, 4> quadrants = {
-                parts[0].octaves[octave][scale],
-                parts[1].octaves[octave][scale],
-                parts[2].octaves[octave][scale],
-                parts[3].octaves[octave][scale]
-            };
-            merged.octaves[octave][scale] = merge_quadrants(quadrants);
-        }
-    }
-    return merged;
-}
 ScaleSpacePyramid generate_gaussian_pyramid(const Image& img, float sigma_min,
                                             int num_octaves, int scales_per_octave)
 {
@@ -80,7 +35,6 @@ ScaleSpacePyramid generate_gaussian_pyramid(const Image& img, float sigma_min,
 
     // create a scale space pyramid of gaussian images
     // images in each octave are half the size of images in the previous one
-    
     ScaleSpacePyramid pyramid = {
         num_octaves,
         imgs_per_octave,
@@ -94,7 +48,24 @@ ScaleSpacePyramid generate_gaussian_pyramid(const Image& img, float sigma_min,
         for (int j = 1; j < sigma_vals.size(); j++) {
             const Image& prev_img = pyramid.octaves[i].back();
             
-            pyramid.octaves[i].push_back(gaussian_blur(prev_img, sigma_vals[j]));
+            std::array<Image,4> quadrants = separate_quadrants(prev_img);
+            //Image blurred = merge_quadrants({
+            //    quadrants[0], quadrants[1], quadrants[2], quadrants[3]});
+            Image q0,q1,q2,q3;
+
+            #pragma omp task shared(q0)
+            q0 = gaussian_blur(quadrants[0], sigma_vals[j]);
+            #pragma omp task shared(q1)
+            q1 = gaussian_blur(quadrants[1], sigma_vals[j]);
+            #pragma omp task shared(q2)
+            q2 = gaussian_blur(quadrants[2], sigma_vals[j]);
+            #pragma omp task shared(q3)
+            q3 = gaussian_blur(quadrants[3], sigma_vals[j]);
+            #pragma omp taskwait
+            const Image& blurred = merge_quadrants({q0, q1, q2, q3});
+
+            pyramid.octaves[i].push_back(blurred);
+//gaussian_blur(blurred, sigma_vals[j]));
         }
 
         // prepare base image for next octave
@@ -102,9 +73,7 @@ ScaleSpacePyramid generate_gaussian_pyramid(const Image& img, float sigma_min,
         base_img = next_base_img.resize(next_base_img.width/2, next_base_img.height/2,
                                         Interpolation::NEAREST);
     }
-    //std::array<ScaleSpacePyramid,4> separated = pyramid_separate(pyramid);
-    //ScaleSpacePyramid pyramid2 = pyramid_merge(separated);
-
+    
     return pyramid;
 }
 
@@ -303,17 +272,11 @@ ScaleSpacePyramid generate_gradient_pyramid(const ScaleSpacePyramid& pyramid)
         pyramid.imgs_per_octave,
         std::vector<std::vector<Image>>(pyramid.num_octaves)
     };
-    #pragma omp parallel for
-//collapse(2)
     for (int i = 0; i < pyramid.num_octaves; i++) {
         grad_pyramid.octaves[i].reserve(grad_pyramid.imgs_per_octave);
         int width = pyramid.octaves[i][0].width;
         int height = pyramid.octaves[i][0].height;
         for (int j = 0; j < pyramid.imgs_per_octave; j++) {
-            //grad_pyramid.octaves[i].reserve(grad_pyramid.imgs_per_octave);
-            //int width = pyramid.octaves[i][0].width;
-            //int height = pyramid.octaves[i][0].height;
-
             Image grad(width, height, 2);
             float gx, gy;
             for (int x = 1; x < grad.width-1; x++) {
@@ -373,7 +336,6 @@ std::vector<float> find_keypoint_orientations(Keypoint& kp,
     int y_end = std::round((kp.y + patch_radius)/pix_dist);
 
     // accumulate gradients in orientation histogram
-    //#pragma omp parallel for collapse(2)
     for (int x = x_start; x <= x_end; x++) {
         for (int y = y_start; y <= y_end; y++) {
             gx = img_grad.get_pixel(x, y, 0);
@@ -383,7 +345,6 @@ std::vector<float> find_keypoint_orientations(Keypoint& kp,
                               /(2*patch_sigma*patch_sigma));
             theta = std::fmod(std::atan2(gy, gx)+2*M_PI, 2*M_PI);
             bin = (int)std::round(N_BINS/(2*M_PI)*theta) % N_BINS;
-            //#pragma omp critical
             hist[bin] += weight * grad_norm;
         }
     }
@@ -520,15 +481,9 @@ std::vector<Keypoint> find_keypoints_and_descriptors(const Image& img, float sig
     std::chrono::duration<double, std::milli> duration = end - start;
     std::cout << "rgb_to_grayscale-Execution time: " << duration.count() << " ms\n";
     start = std::chrono::high_resolution_clock::now();
-/*
-    std::array<Image,4> quadrants = separate_quadrants(input);
-    ScaleSpacePyramid gaussian_pyramid0 = generate_gaussian_pyramid(quadrants[0], sigma_min, num_octaves, scales_per_octave);
-    ScaleSpacePyramid gaussian_pyramid1 = generate_gaussian_pyramid(quadrants[1], sigma_min, num_octaves, scales_per_octave);
-    ScaleSpacePyramid gaussian_pyramid2 = generate_gaussian_pyramid(quadrants[2], sigma_min, num_octaves, scales_per_octave);
-    ScaleSpacePyramid gaussian_pyramid3 = generate_gaussian_pyramid(quadrants[3], sigma_min, num_octaves, scales_per_octave);
-    ScaleSpacePyramid gaussian_pyramid_mgd = pyramid_merge({gaussian_pyramid0, gaussian_pyramid1, gaussian_pyramid2, gaussian_pyramid3});
-*/
-    ScaleSpacePyramid gaussian_pyramid = generate_gaussian_pyramid(input, sigma_min, num_octaves,scales_per_octave);
+    
+    ScaleSpacePyramid gaussian_pyramid = generate_gaussian_pyramid(input, sigma_min, num_octaves,
+                                                                   scales_per_octave);
                                                                    
     end = std::chrono::high_resolution_clock::now();
     duration = end - start;
@@ -595,4 +550,3 @@ Image draw_keypoints(const Image& img, const std::vector<Keypoint>& kps)
     }
     return res;
 }
-

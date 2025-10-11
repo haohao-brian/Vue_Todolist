@@ -3,13 +3,14 @@
 #include <string>
 #include <filesystem>
 #include <chrono>
+//#include <cuda.h>
 
 #include "image.hpp"
 #include "sift.hpp"
 
-
 int main(int argc, char *argv[])
 {
+
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(NULL);
 
@@ -25,8 +26,9 @@ int main(int argc, char *argv[])
     auto start = std::chrono::high_resolution_clock::now();
     
     Image img(input_img);
-    img =  img.channels == 1 ? img : rgb_to_grayscale(img);
-
+    img = img.channels == 1 ? img : rgb_to_grayscale(img);
+    //std::array<Image,4> quadrants = separate_quadrants(img);
+    //Image img2 = merge_quadrants(quadrants);
     std::vector<Keypoint> kps = find_keypoints_and_descriptors(img);
 
 
@@ -59,3 +61,4 @@ int main(int argc, char *argv[])
     std::cout << "Found " << kps.size() << " keypoints.\n";
     return 0;
 }
+
