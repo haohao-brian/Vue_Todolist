@@ -11,6 +11,52 @@
 #include "image.hpp"
 
 #include <chrono>
+std::array<ScaleSpacePyramid, 4> pyramid_separate(const ScaleSpacePyramid& pyramid)
+{
+    std::array<ScaleSpacePyramid, 4> parts;
+    for (auto& part : parts) {
+        part.num_octaves = pyramid.num_octaves;
+        part.imgs_per_octave = pyramid.imgs_per_octave;
+        part.octaves.assign(pyramid.num_octaves, std::vector<Image>(pyramid.imgs_per_octave));
+    }
+
+    for (int octave = 0; octave < pyramid.num_octaves; ++octave) {
+        for (int scale = 0; scale < pyramid.imgs_per_octave; ++scale) {
+            const Image& img = pyramid.octaves[octave][scale];
+            std::array<Image, 4> quadrants = separate_quadrants(img);
+            for (int k = 0; k < 4; ++k) {
+                parts[k].octaves[octave][scale] = quadrants[k];
+            }
+        }
+    }
+    return parts;
+}
+
+ScaleSpacePyramid pyramid_merge(const std::array<ScaleSpacePyramid, 4>& parts)
+{
+    assert(parts.size() == 4);
+
+    ScaleSpacePyramid merged = {
+        parts[0].num_octaves,
+        parts[0].imgs_per_octave,
+        std::vector<std::vector<Image>>(parts[0].num_octaves,
+                                        std::vector<Image>(parts[0].imgs_per_octave))
+    };
+
+    for (int octave = 0; octave < merged.num_octaves; ++octave) {
+        for (int scale = 0; scale < merged.imgs_per_octave; ++scale) {
+            std::array<Image, 4> quadrants = {
+                parts[0].octaves[octave][scale],
+                parts[1].octaves[octave][scale],
+                parts[2].octaves[octave][scale],
+                parts[3].octaves[octave][scale]
+            };
+            merged.octaves[octave][scale] = merge_quadrants(quadrants);
+        }
+    }
+    return merged;
+}
+
 
 ScaleSpacePyramid generate_gaussian_pyramid(const Image& img, float sigma_min,
                                             int num_octaves, int scales_per_octave)
