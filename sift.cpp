@@ -82,7 +82,7 @@ ScaleSpacePyramid generate_gaussian_pyramid(const Image& img, float sigma_min,
         {
             for (int j = 1; j < sigma_vals.size(); j++) {
 //                if (j==imgs_per_octave-3){
-                    const Image& blurred = merge_quadrants({q0[j], q1[j], q2[j], q3[j]});
+                    Image blurred = merge_quadrants({q0[j], q1[j], q2[j], q3[j]});
                     pyramid.octaves[i].push_back(blurred);
   //              }else{
 //                    const Image& blurred = merge_quadrants({q0[j], q1[j], q2[j], q3[j]});
@@ -91,9 +91,27 @@ ScaleSpacePyramid generate_gaussian_pyramid(const Image& img, float sigma_min,
             }
         }
         // prepare base image for next octave
-        const Image& next_base_img = pyramid.octaves[i][imgs_per_octave-3];
+        Image next_base_img = pyramid.octaves[i][imgs_per_octave-3];
         base_img = next_base_img.resize(next_base_img.width/2, next_base_img.height/2,
                                         Interpolation::NEAREST);
+        
+        std::array<Image,4> N = separate_quadrants(next_base_img);
+        //delete []N;
+        N[0] = N[0].resize(next_base_img.width/2, 
+                        next_base_img.height/2,Interpolation::NEAREST);
+        N[1] = N[1].resize(next_base_img.width/2, 
+                        next_base_img.height/2,Interpolation::NEAREST);
+        N[2] = N[2].resize(next_base_img.width/2, 
+                        next_base_img.height/2,Interpolation::NEAREST);
+        N[3] = N[3].resize(next_base_img.width/2, 
+                        next_base_img.height/2,Interpolation::NEAREST);
+        //delete N[1].data;
+        //Image nn;
+
+        if(N[0].height>40) {
+            //base_img = merge_quadrants({N[0],N[1],N[2],N[3]});
+            //base_img = nn;
+        }
     }
     return pyramid;
 }
