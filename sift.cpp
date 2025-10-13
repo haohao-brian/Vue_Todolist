@@ -11,7 +11,7 @@
 #include "image.hpp"
 
 #include <chrono>
-
+/*
 ScaleSpacePyramid generate_gaussian_pyramid(const Image& img, float sigma_min,
                                             int num_octaves, int scales_per_octave)
 {
@@ -45,77 +45,156 @@ ScaleSpacePyramid generate_gaussian_pyramid(const Image& img, float sigma_min,
     };
     for (int i = 0; i < num_octaves; i++) {
         pyramid.octaves[i].reserve(imgs_per_octave);
+        //pyramid.octaves[i] = std::vector<Image>(imgs_per_octave);
         pyramid.octaves[i].push_back(std::move(base_img));
         
         //int threads = omp_get_max_threads();
         const Image& prev_img = pyramid.octaves[i].back();
         Image q0[sigma_vals.size()], q1[sigma_vals.size()], q2[sigma_vals.size()], q3[sigma_vals.size()];
         auto sep = separate_quadrants(prev_img);
-        q0[0] = sep[0];
-        q1[0] = sep[1];
-        q2[0] = sep[2];
-        q3[0] = sep[3];
         #pragma omp task shared(q0)
         {
+            q0[0] = sep[0];
             for (int j = 1; j < sigma_vals.size(); j++) {
                 q0[j] = gaussian_blur(q0[j-1], sigma_vals[j]);
             }
         }
         #pragma omp task shared(q1)
         {
+            q1[0] = sep[1];
+
             for (int j = 1; j < sigma_vals.size(); j++) {
                  q1[j] = gaussian_blur(q1[j-1], sigma_vals[j]);
             }
         }
         #pragma omp task shared(q2)
         {
+            q2[0] = sep[2];
+
             for (int j = 1; j < sigma_vals.size(); j++) {
                 q2[j] = gaussian_blur(q2[j-1], sigma_vals[j]);
             }
         }
-//        #pragma omp task shared(q3)
+        #pragma omp task shared(q3)
         {
+            q3[0] = sep[3];
             for (int j = 1; j < sigma_vals.size(); j++) {
                 q3[j] = gaussian_blur(q3[j-1], sigma_vals[j]);
             }
         }
         {
+            Image blurred[sigma_vals.size()];
+            //#pragma omp parallel for
+        //#pragma omp parallel
+        {
+            //#pragma omp taskloop
             for (int j = 1; j < sigma_vals.size(); j++) {
 //                if (j==imgs_per_octave-3){
-                    Image blurred = merge_quadrants({q0[j], q1[j], q2[j], q3[j]});
-                    pyramid.octaves[i].push_back(blurred);
-  //              }else{
-//                    const Image& blurred = merge_quadrants({q0[j], q1[j], q2[j], q3[j]});
-  //                  pyramid.octaves[i].push_back(q0[j]);
-    //            }
+                      while (!q0[j].data || !q1[j].data || !q2[j].data || !q3[j].data) {
+                         // wait for all quadrants to be ready
+                      }
+                      blurred[j] = merge_quadrants({q0[j], q1[j], q2[j], q3[j]});
+                      if (j==imgs_per_octave-3){
+                          base_img = blurred[j].resize(blurred[j].width/2, blurred[j].height/2,Interpolation::NEAREST);
+                          
+                      }
             }
         }
-        // prepare base image for next octave
-        Image next_base_img = pyramid.octaves[i][imgs_per_octave-3];
-        base_img = next_base_img.resize(next_base_img.width/2, next_base_img.height/2,
-                                        Interpolation::NEAREST);
-        
-        std::array<Image,4> N = separate_quadrants(next_base_img);
-        //delete []N;
-        N[0] = N[0].resize(next_base_img.width/2, 
-                        next_base_img.height/2,Interpolation::NEAREST);
-        N[1] = N[1].resize(next_base_img.width/2, 
-                        next_base_img.height/2,Interpolation::NEAREST);
-        N[2] = N[2].resize(next_base_img.width/2, 
-                        next_base_img.height/2,Interpolation::NEAREST);
-        N[3] = N[3].resize(next_base_img.width/2, 
-                        next_base_img.height/2,Interpolation::NEAREST);
-        //delete N[1].data;
-        //Image nn;
-
-        if(N[0].height>40) {
-            //base_img = merge_quadrants({N[0],N[1],N[2],N[3]});
-            //base_img = nn;
+            //#pragma omp task
+            for (int j = 1; j < sigma_vals.size();j++){
+                  pyramid.octaves[i].push_back(blurred[j]);
+            }
+                      int j = imgs_per_octave -3;
+                      while (!q0[j].data || !q1[j].data || !q2[j].data || !q3[j].data) {
+                         // wait for all quadrants to be ready
+                      }
+                      blurred[j] = merge_quadrants({q0[j], q1[j], q2[j], q3[j]});
+                      if (j==imgs_per_octave-3){
+                          base_img = blurred[j].resize(blurred[j].width/2, blurred[j].height/2,Interpolation::NEAREST);
+                          
+                      }
         }
     }
     return pyramid;
 }
+*/
+ScaleSpacePyramid generate_gaussian_pyramid(const Image& img, float sigma_min,
+                                            int num_octaves, int scales_per_octave)
+{
+    // assume initial sigma is 1.0 (after resizing) and smooth
+    // the image with sigma_diff to reach requried base_sigma
+    float base_sigma = sigma_min / MIN_PIX_DIST;
+    Image base_img = img.resize(img.width*2, img.height*2, Interpolation::BILINEAR);
+    float sigma_diff = std::sqrt(base_sigma*base_sigma - 1.0f);
+    base_img = gaussian_blur(base_img, sigma_diff);
 
+    int imgs_per_octave = scales_per_octave + 3;
+
+    // determine sigma values for bluring
+    float k = std::pow(2, 1.0/scales_per_octave);
+    std::vector<float> sigma_vals(imgs_per_octave);
+    //{base_sigma};
+    sigma_vals.push_back(base_sigma);
+    #pragma omp parallel for
+    for (int i = 1; i < imgs_per_octave; i++) {
+        float sigma_prev = base_sigma * std::pow(k, i-1);
+        float sigma_total = k * sigma_prev;
+        sigma_vals[i] = (std::sqrt(sigma_total*sigma_total - sigma_prev*sigma_prev));
+    }
+
+    // create a scale space pyramid of gaussian images
+    // images in each octave are half the size of images in the previous one
+    ScaleSpacePyramid pyramid = {
+        num_octaves,
+        imgs_per_octave,
+        std::vector<std::vector<Image>>(num_octaves)
+    };
+    
+    for (int i = 0; i < num_octaves; i++) {
+        pyramid.octaves[i].reserve(imgs_per_octave);
+        pyramid.octaves[i].push_back(std::move(base_img));
+        //int threads = omp_get_max_threads();
+        Image prev_img;// = pyramid.octaves[i].back();
+        //std::cout << sigma_vals.size() << std::endl;
+
+        int t = 1;
+            prev_img = pyramid.octaves[i].back();
+            pyramid.octaves[i].push_back(gaussian_blur(prev_img, sigma_vals[1]));
+            prev_img = pyramid.octaves[i].back();
+            pyramid.octaves[i].push_back(gaussian_blur(prev_img, sigma_vals[2]));
+            prev_img = pyramid.octaves[i].back();
+            pyramid.octaves[i].push_back(gaussian_blur(prev_img, sigma_vals[3]));
+            prev_img = pyramid.octaves[i].back();
+            pyramid.octaves[i].push_back(gaussian_blur(prev_img, sigma_vals[4]));
+//            pyramid.octaves[i].push_back(gaussian_blur(pyramid.octaves[i][t], sqrt(sigma_vals[t+1]*sigma_vals[t+1]+sigma_vals[t+2]*sigma_vals[t+2]+sigma_vals[t+3]+sigma_vals[t+3])));
+
+            prev_img = pyramid.octaves[i].back();
+//            pyramid.octaves[i].push_back(gaussian_blur(pyramid.octaves[i][t], sqrt(sigma_vals[t+1]*sigma_vals[t+1]+sigma_vals[t+2]*sigma_vals[t+2])));//sigma_vals[3]));
+
+            pyramid.octaves[i].push_back(gaussian_blur(prev_img, sigma_vals[5]));
+
+/*
+        for (int j = 1; j < 6; j++){//sigma_vals.size(); j++) {
+            prev_img = pyramid.octaves[i].back();
+            pyramid.octaves[i].push_back(gaussian_blur(prev_img, sigma_vals[j]));
+        }
+*/
+        #pragma omp task private(prev_img) shared(pyramid)
+        {
+        Image prev_img = pyramid.octaves[i].back();
+        pyramid.octaves[i].push_back(gaussian_blur(prev_img, sigma_vals[6]));
+        prev_img = pyramid.octaves[i].back();
+        pyramid.octaves[i].push_back(gaussian_blur(prev_img, sigma_vals[7]));
+        }
+        // prepare base image for next octave
+        const Image& next_base_img = pyramid.octaves[i][imgs_per_octave-3];
+        //std::cout << imgs_per_octave-3 << std::endl;
+        base_img = next_base_img.resize(next_base_img.width/2, next_base_img.height/2,
+                                        Interpolation::NEAREST);
+    }
+    
+    return pyramid;
+}
 // generate pyramid of difference of gaussians (DoG) images
 ScaleSpacePyramid generate_dog_pyramid(const ScaleSpacePyramid& img_pyramid)
 {
