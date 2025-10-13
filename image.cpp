@@ -200,6 +200,7 @@ Image Image::resize(int new_w, int new_h, Interpolation method) const
     }
     return resized;
 }
+/*
 std::array<Image, 4> separate_quadrants(const Image& img)
 {
     int left_w = img.width / 2 + 20;
@@ -252,7 +253,62 @@ std::array<Image, 4> separate_quadrants(const Image& img)
 
     return quadrants;
 }
+*/
+std::array<Image, 4> separate_quadrants(const Image& img)
+{
+    int left_w = img.width / 2 + 20;
+    int right_w = img.width - img.width / 2 + 20;
+    int top_h = img.height / 2 + 20;
+    int bottom_h = img.height - img.height/2 + 20;
+    int channels = img.channels;
 
+    std::array<Image, 4> quadrants = {
+        Image(left_w, top_h, channels),
+        Image(right_w, top_h, channels),
+        Image(left_w, bottom_h, channels),
+        Image(right_w, bottom_h, channels)
+    };
+    auto copy_tile = [&](Image& dst, int dst_width, int dst_height,
+                         int src_x_offset, int src_y_offset)
+    {
+        float* dst_data = dst.data;
+        int dst_w = dst.width;
+        int dst_h = dst.height;
+        for (int y = 0; y < dst_height; ++y) {
+            int src_y = y + src_y_offset;
+            for (int x = 0; x < dst_width; ++x) {
+                int src_x = x + src_x_offset;
+                for (int c = 0; c < channels; ++c) {
+                    dst_data[c*dst_w*dst_h + y*dst_w + x] =
+                        img.get_pixel(src_x, src_y, c);
+                }
+            }
+        }
+    };
+
+    #pragma omp parallel
+    {
+        #pragma omp sections nowait
+        {
+            #pragma omp section
+            copy_tile(quadrants[0], left_w, top_h, 0, 0);
+
+            #pragma omp section
+            copy_tile(quadrants[1], right_w, top_h,
+                      img.width - right_w, 0);
+
+            #pragma omp section
+            copy_tile(quadrants[2], left_w, bottom_h,
+                      0, img.height - bottom_h);
+
+            #pragma omp section
+            copy_tile(quadrants[3], right_w, bottom_h,
+                      img.width - right_w, img.height - bottom_h);
+        }
+    }
+
+    return quadrants;
+}
 Image merge_quadrants(const std::array<Image, 4>& quadrants)
 {
     int channels = quadrants[0].channels;
